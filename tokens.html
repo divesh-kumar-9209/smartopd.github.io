@@ -14,10 +14,13 @@
     input{padding:8px;width:260px;max-width:100%}
     button{padding:8px 12px}
     #list{margin-top:14px;max-width:960px}
-    .item{padding:10px;border:1px solid #e6e6e6;border-radius:6px;margin-bottom:8px;background:#fff;display:flex;align-items:center;justify-content:space-between}
-    .left{font-size:15px}
+    .card{padding:14px;border:1px solid #e6e6e6;border-radius:8px;margin-bottom:12px;background:#fff;box-shadow:0 2px 6px rgba(0,0,0,0.03);display:flex;justify-content:space-between;align-items:center}
+    .left{line-height:1.4}
+    .title{font-size:18px;margin:0 0 6px}
+    .muted{color:#666;font-size:13px}
     .actions button{margin-left:8px}
     .empty{color:#666}
+    .bigToken{font-size:28px;font-weight:700;color:#1a73e8}
   </style>
 </head>
 <body>
@@ -28,7 +31,7 @@
   <input id="hospitalIdInput" placeholder="Enter Hospital ID e.g. HOSP1">
   <input id="dateInput" type="date">
   <button id="loadBtn">Load Tokens</button>
-  <button id="liveBtn">Live Listen</button>
+  <button id="liveBtn">Start Live</button>
   <button id="stopLiveBtn" disabled>Stop Live</button>
 </div>
 
@@ -51,9 +54,36 @@
     return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
   }
 
-  var liveUnsub = null;
+  function formatTime(h,m){
+    var hh = (h % 12) === 0 ? 12 : (h % 12);
+    var mm = String(m).padStart(2,"0");
+    var ap = h >= 12 ? "PM" : "AM";
+    return hh + ":" + mm + " " + ap;
+  }
 
-  function renderList(docs){
+  function computeSlotAndWindow(tokenNumber, maxPerDay){
+    var perSlot = Math.max(1, Math.ceil(maxPerDay / 3));
+    var tokenIdx = tokenNumber - 1;
+    var slotIndex = Math.floor(tokenIdx / perSlot);
+    var slotStartHour = 9 + slotIndex;
+    var posInSlot = tokenIdx % perSlot;
+    var minutesPerToken = Math.floor(60 / perSlot);
+    if(minutesPerToken < 1) minutesPerToken = 1;
+    var startMinute = posInSlot * minutesPerToken;
+    var endMinute = startMinute + minutesPerToken - 1;
+    var startTime = formatTime(slotStartHour, startMinute);
+    var endMinuteAdj = startMinute + minutesPerToken;
+    var endHour = slotStartHour + Math.floor(endMinuteAdj / 60);
+    var endMin = endMinuteAdj % 60;
+    var endTime = formatTime(endHour, endMin === 0 ? 0 : endMin);
+    return {
+      slotLabel: (slotStartHour) + ":00 - " + (slotStartHour+1) + ":00",
+      window: startTime + " to " + endTime,
+      fallbackAfter: Math.max(1, Math.floor(perSlot/2))
+    };
+  }
+
+  function renderList(docs, maxPerDay){
     var list = document.getElementById("list");
     list.innerHTML = "";
     if(!docs || docs.length === 0){
@@ -64,38 +94,70 @@
       return;
     }
     docs.forEach(function(entry){
-      var div = document.createElement("div");
-      div.className = "item";
+      var card = document.createElement("div");
+      card.className = "card";
+
       var left = document.createElement("div");
       left.className = "left";
-      left.innerHTML = "<strong>T" + entry.tokenNumber + "</strong> &nbsp; " + (entry.name || entry.uid || "Unknown") + " &nbsp; | &nbsp; " + (entry.slot || "") + " &nbsp; | &nbsp; " + (entry.date || "");
+
+      var title = document.createElement("div");
+      title.className = "title";
+      var tokenNum = entry.tokenNumber || 0;
+      title.innerHTML = "Token Number - <span class='bigToken'>T" + tokenNum + "</span>";
+
+      var nameLine = document.createElement("div");
+      nameLine.className = "muted";
+      nameLine.innerText = "Patient: " + (entry.name || entry.uid || "Unknown") + " | Dept: " + (entry.dept || "");
+
+      var slotInfo = computeSlotAndWindow(tokenNum, maxPerDay);
+      var visitLine = document.createElement("div");
+      visitLine.style.marginTop = "8px";
+      visitLine.innerHTML = "<strong>Visiting time:</strong> " + slotInfo.window;
+
+      var noteLine = document.createElement("div");
+      noteLine.className = "muted";
+      noteLine.style.marginTop = "6px";
+      noteLine.innerText = "If you miss this time, you will be called again after " + slotInfo.fallbackAfter + " patients.";
+
+      left.appendChild(title);
+      left.appendChild(nameLine);
+      left.appendChild(visitLine);
+      left.appendChild(noteLine);
+
       var actions = document.createElement("div");
       actions.className = "actions";
+
+      var statusSpan = document.createElement("div");
+      statusSpan.style.marginBottom = "8px";
+      statusSpan.innerText = entry.status ? ("Status: " + entry.status) : "Status: Pending";
+
       var callBtn = document.createElement("button");
       callBtn.innerText = "Call";
       callBtn.onclick = function(){
         db.collection("tokens").doc(entry._id).update({ status: "Called" });
       };
+
       var checkBtn = document.createElement("button");
       checkBtn.innerText = "Checked In";
       checkBtn.onclick = function(){
         db.collection("tokens").doc(entry._id).update({ status: "Checked In" });
       };
+
       var delBtn = document.createElement("button");
       delBtn.innerText = "Delete";
       delBtn.onclick = function(){
-        if(confirm("Delete token T" + entry.tokenNumber + "?")) db.collection("tokens").doc(entry._id).delete();
+        if(confirm("Delete token T" + tokenNum + "?")) db.collection("tokens").doc(entry._id).delete();
       };
-      var statusSpan = document.createElement("span");
-      statusSpan.style.marginLeft = "12px";
-      statusSpan.innerText = entry.status ? ("Status: " + entry.status) : "";
+
+      actions.appendChild(statusSpan);
       actions.appendChild(callBtn);
       actions.appendChild(checkBtn);
       actions.appendChild(delBtn);
-      actions.appendChild(statusSpan);
-      div.appendChild(left);
-      div.appendChild(actions);
-      list.appendChild(div);
+
+      card.appendChild(left);
+      card.appendChild(actions);
+
+      list.appendChild(card);
     });
   }
 
@@ -114,41 +176,57 @@
   function loadTokensOnce(hospitalId, dateStr){
     if(!hospitalId){ alert("Enter hospital ID"); return; }
     if(!dateStr) dateStr = todayString();
-    db.collection("tokens").where("hospitalId","==",hospitalId).where("date","==",dateStr).get()
-      .then(function(snap){
+    db.collection("hospitals").where("hospitalId","==",hospitalId).get().then(function(hsnap){
+      var maxPerDay = 60;
+      if(!hsnap.empty) maxPerDay = hsnap.docs[0].data().maxPerDay || 60;
+      db.collection("tokens").where("hospitalId","==",hospitalId).where("date","==",dateStr).get()
+        .then(function(snap){
+          var arr = [];
+          snap.forEach(function(doc){
+            var d = doc.data();
+            d._id = doc.id;
+            arr.push(d);
+          });
+          arr.forEach(function(d, idx){
+            if(!d.tokenNumber) d.tokenNumber = idx + 1;
+          });
+          sortByIssuedAt(arr);
+          renderList(arr, maxPerDay);
+        })
+        .catch(function(err){
+          alert("Error fetching tokens: " + err.message);
+        });
+    }).catch(function(e){ alert(e.message); });
+  }
+
+  var liveUnsub = null;
+
+  function startLiveListen(hospitalId, dateStr){
+    if(!hospitalId){ alert("Enter hospital ID"); return; }
+    if(!dateStr) dateStr = todayString();
+    stopLiveListen();
+    db.collection("hospitals").where("hospitalId","==",hospitalId).get().then(function(hsnap){
+      var maxPerDay = 60;
+      if(!hsnap.empty) maxPerDay = hsnap.docs[0].data().maxPerDay || 60;
+      var q = db.collection("tokens").where("hospitalId","==",hospitalId).where("date","==",dateStr);
+      liveUnsub = q.onSnapshot(function(snap){
         var arr = [];
         snap.forEach(function(doc){
           var d = doc.data();
           d._id = doc.id;
           arr.push(d);
         });
+        arr.forEach(function(d, idx){
+          if(!d.tokenNumber) d.tokenNumber = idx + 1;
+        });
         sortByIssuedAt(arr);
-        renderList(arr);
-      })
-      .catch(function(err){
-        alert("Error fetching tokens: " + err.message);
+        renderList(arr, maxPerDay);
+      }, function(err){
+        alert("Error listening tokens: " + err.message);
       });
-  }
-
-  function startLiveListen(hospitalId, dateStr){
-    if(!hospitalId){ alert("Enter hospital ID"); return; }
-    if(!dateStr) dateStr = todayString();
-    stopLiveListen();
-    var q = db.collection("tokens").where("hospitalId","==",hospitalId).where("date","==",dateStr);
-    liveUnsub = q.onSnapshot(function(snap){
-      var arr = [];
-      snap.forEach(function(doc){
-        var d = doc.data();
-        d._id = doc.id;
-        arr.push(d);
-      });
-      sortByIssuedAt(arr);
-      renderList(arr);
-    }, function(err){
-      alert("Error listening tokens: " + err.message);
-    });
-    document.getElementById("liveBtn").disabled = true;
-    document.getElementById("stopLiveBtn").disabled = false;
+      document.getElementById("liveBtn").disabled = true;
+      document.getElementById("stopLiveBtn").disabled = false;
+    }).catch(function(e){ alert(e.message); });
   }
 
   function stopLiveListen(){
