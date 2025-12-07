@@ -1,227 +1,234 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Patient Portal</title>
-  <link rel="stylesheet" href="./style.css">
-  <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
-  <style>
-    body{font-family:Arial, sans-serif;padding:20px;background:#fafafa}
-    input{display:block;margin:8px 0;padding:8px;width:320px;max-width:100%}
-    button{padding:8px 12px;margin:6px 6px 0 0}
-    #afterLogin{display:none}
-    video{border:1px solid #ccc;border-radius:6px}
-  </style>
+<meta charset="utf 8">
+<meta name="viewport" content="width=device width,initial scale=1">
+<title>Patient Portal</title>
+<link rel="stylesheet" href="./style.css">
+<script src="https cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+<script src="https www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+<script src="https www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
+<script src="https www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
 </head>
 <body>
 
-<h2>Patient Portal</h2>
+<h2 class="center">Patient Portal</h2>
 
-<div id="authArea">
-  <h3>Signup</h3>
+<div id="authArea" class="form-section card-box">
+  <h3>Create account</h3>
   <input id="pname" placeholder="Full name">
   <input id="pemail" placeholder="Email">
   <input id="ppass" type="password" placeholder="Password">
   <button id="signupBtn">Signup</button>
 
-  <h3 style="margin-top:18px">Login</h3>
+  <h3>Login</h3>
   <input id="pemail2" placeholder="Email">
   <input id="ppass2" type="password" placeholder="Password">
   <button id="loginBtn">Login</button>
 </div>
 
-<div id="afterLogin">
-  <p id="loggedText">You are logged in. Scan hospital QR to get token.</p>
-  <video id="video" style="width:320px;height:auto"></video>
-  <canvas id="canvas" style="display:none"></canvas>
-  <div style="margin-top:12px">
-    <button id="scanBtn">Scan QR and get token</button>
-    <button id="logoutBtn">Logout</button>
+<div id="afterLogin" style="display none">
+  <div class="center" style="margin bottom 16px">Welcome, scan hospital QR to get token</div>
+
+  <div id="appointmentBox" class="tokenDisplay" style="display none">
+    <div>Token Number <span class="token" id="apptToken"></span></div>
+    <div id="apptSlot" style="margin top 8px"></div>
+    <div id="apptNote" style="margin top 6px"></div>
+    <div id="apptDate" style="margin top 8px"></div>
   </div>
+
+  <video id="video"></video>
+  <canvas id="canvas" style="display none"></canvas>
+
+  <br>
+  <button id="scanBtn">Scan QR and get token</button>
+  <button id="logoutBtn">Logout</button>
 </div>
 
 <script>
-  var firebaseConfig = {
-    apiKey: "AIzaSyAJnlrtazUWr_HjQiEkFNcbnsve73g1pEQ",
-    authDomain: "smart-opd-69488.firebaseapp.com",
-    projectId: "smart-opd-69488",
-    storageBucket: "smart-opd-69488.firebasestorage.app",
-    messagingSenderId: "373276983810",
-    appId: "1:373276983810:web:88a3018ab7b811550d1d1b"
-  };
-  firebase.initializeApp(firebaseConfig);
-  var auth = firebase.auth();
-  var db = firebase.firestore();
+var firebaseConfig = {
+  apiKey: "AIzaSyAJnlrtazUWr_HjQiEkFNcbnsve73g1pEQ",
+  authDomain: "smart-opd-69488.firebaseapp.com",
+  projectId: "smart-opd-69488",
+  storageBucket: "smart-opd-69488.firebasestorage.app",
+  messagingSenderId: "373276983810",
+  appId: "1:373276983810:web:88a3018ab7b811550d1d1b"
+}
+firebase.initializeApp(firebaseConfig)
+var auth = firebase.auth()
+var db = firebase.firestore()
 
-  function todayString(){
-    var d = new Date();
-    return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
+function todayString(){
+  var d = new Date()
+  return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0")
+}
+
+function pad(n){ return String(n).padStart(2,"0") }
+
+function formatTime(h,m){
+  var ap = h >= 12 ? "PM" : "AM"
+  var hh = h % 12 === 0 ? 12 : h % 12
+  return hh + ":" + pad(m) + " " + ap
+}
+
+function computeSlotAndWindow(tokenNumber, maxPerDay){
+  var perSlot = Math.max(1, Math.ceil(maxPerDay / 3))
+  var idx = tokenNumber - 1
+  var slotIndex = Math.floor(idx / perSlot)
+  var slotStartHour = 9 + slotIndex
+  var posInSlot = idx % perSlot
+  var minutesPerToken = Math.max(1, Math.floor(60 / perSlot))
+  var startMinute = posInSlot * minutesPerToken
+  var endMinuteOffset = startMinute + minutesPerToken
+  var endHour = slotStartHour + Math.floor(endMinuteOffset / 60)
+  var endMin = endMinuteOffset % 60
+  var start = formatTime(slotStartHour, startMinute)
+  var end = formatTime(endHour, endMin === 0 ? 0 : endMin)
+  var fallbackAfter = Math.max(1, Math.floor(perSlot / 2))
+  return {
+    window: start + " to " + end,
+    fallbackAfter: fallbackAfter
   }
+}
 
-  function show(msg){
-    alert(msg);
-  }
+function showAppointment(tokenNumber, slotWindow, dateStr, fallbackAfter){
+  document.getElementById("appointmentBox").style.display = "block"
+  document.getElementById("apptToken").innerText = "T" + tokenNumber
+  document.getElementById("apptSlot").innerText = "Visiting time is " + slotWindow
+  document.getElementById("apptNote").innerText = "On missing the chance at the given time you will be called again after " + fallbackAfter + " patients"
+  document.getElementById("apptDate").innerText = "Date " + dateStr
+}
 
-  function signup(){
-    var name = document.getElementById("pname").value.trim();
-    var email = document.getElementById("pemail").value.trim();
-    var pass = document.getElementById("ppass").value;
-    if(!name || !email || !pass){ show("Fill all fields"); return; }
-    auth.createUserWithEmailAndPassword(email, pass)
-      .then(function(cred){
-        return db.collection("patients").add({
-          uid: cred.user.uid,
-          name: name,
-          email: email,
-          createdAt: firebase.firestore.FieldValue.serverTimestamp()
-        });
-      })
-      .then(function(){ show("Signup done. Please login."); })
-      .catch(function(err){ show(err.message); });
-  }
+function clearAppointment(){
+  document.getElementById("appointmentBox").style.display = "none"
+}
 
-  function login(){
-    var email = document.getElementById("pemail2").value.trim();
-    var pass = document.getElementById("ppass2").value;
-    if(!email || !pass){ show("Fill login fields"); return; }
-    auth.signInWithEmailAndPassword(email, pass).catch(function(err){ show(err.message); });
-  }
+function signup(){
+  var name = document.getElementById("pname").value.trim()
+  var email = document.getElementById("pemail").value.trim()
+  var pass = document.getElementById("ppass").value
+  if(!name || !email || !pass) return
+  auth.createUserWithEmailAndPassword(email, pass).then(function(cred){
+    return db.collection("patients").add({
+      uid: cred.user.uid,
+      name: name,
+      email: email,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    })
+  })
+}
 
-  function logout(){
-    auth.signOut().catch(function(){});
-  }
+function login(){
+  var email = document.getElementById("pemail2").value.trim()
+  var pass = document.getElementById("ppass2").value
+  if(!email || !pass) return
+  auth.signInWithEmailAndPassword(email, pass)
+}
 
-  function issueTokenFor(hospitalId){
-    var user = auth.currentUser;
-    if(!user){ show("Please login first"); return; }
-    var dateStr = todayString();
-    db.collection("tokens").where("hospitalId","==",hospitalId).where("date","==",dateStr).get()
-      .then(function(snap){
-        var count = snap.size;
-        db.collection("hospitals").where("hospitalId","==",hospitalId).get()
-          .then(function(hs){
-            var max = 60;
-            if(!hs.empty){
-              var data = hs.docs[0].data();
-              if(data.maxPerDay) max = data.maxPerDay;
-            }
-            if(count >= max){ show("All appointments full for today"); return; }
-            var token = count + 1;
-            var slot = token <= 20 ? "09:00 to 10:00" : token <= 40 ? "10:00 to 11:00" : "11:00 to 12:00";
-            db.collection("tokens").add({
-              hospitalId: hospitalId,
-              uid: user.uid,
-              tokenNumber: token,
-              date: dateStr,
-              slot: slot,
-              issuedAt: firebase.firestore.FieldValue.serverTimestamp(),
-              status: "Pending"
-            }).then(function(){ show("Your token is T" + token + " for slot " + slot); });
-          });
-      })
-      .catch(function(err){ show(err.message); });
-  }
+function logout(){
+  auth.signOut()
+  clearAppointment()
+}
 
-  async function startScan(){
-    var video = document.getElementById("video");
-    var canvas = document.getElementById("canvas");
-    var ctx = canvas.getContext("2d");
-
-    function showAlert(msg){
-      alert(msg);
-      console.log(msg);
-    }
-
-    if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
-      showAlert("Camera API not supported in this browser");
-      return;
-    }
-
-    try{
-      var devices = await navigator.mediaDevices.enumerateDevices();
-      var hasCamera = devices.some(function(d){ return d.kind === "videoinput"; });
-      if(!hasCamera){ showAlert("No camera found on this device"); return; }
-    }catch(e){ console.warn("enumerateDevices fail", e); }
-
-    var stream = null;
-
-    async function tryGetStream(constraints){
-      try{ return await navigator.mediaDevices.getUserMedia(constraints); }
-      catch(err){ console.warn("getUserMedia failed", constraints, err); return null; }
-    }
-
-    var constraintsList = [
-      { video: { facingMode: { exact: "environment" } }, audio: false },
-      { video: { facingMode: "environment" }, audio: false },
-      { video: true, audio: false }
-    ];
-
-    for(var i=0;i<constraintsList.length;i++){
-      stream = await tryGetStream(constraintsList[i]);
-      if(stream) break;
-    }
-
-    if(!stream){ showAlert("Could not start video source. Check camera permission or close other apps using camera."); return; }
-
-    video.srcObject = stream;
-    try{ await video.play(); } catch(e){ console.warn("video play failed", e); }
-
-    var stopRequested = false;
-
-    function stopStream(){
-      if(stream){ stream.getTracks().forEach(function(t){ t.stop(); }); }
-      stopRequested = true;
-    }
-
-    function scanLoop(){
-      if(stopRequested) return;
-      if(video.readyState === video.HAVE_ENOUGH_DATA){
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        ctx.drawImage(video,0,0,canvas.width,canvas.height);
-        try{
-          var img = ctx.getImageData(0,0,canvas.width,canvas.height);
-          var code = jsQR(img.data,img.width,img.height);
-          if(code){
-            try{
-              var data = JSON.parse(code.data);
-              if(data.hospitalId){
-                stopStream();
-                issueTokenFor(data.hospitalId);
-                return;
-              }
-            }catch(e){}
-          }
-        }catch(e){ console.warn("getImageData error", e); }
+function fetchUserTodayToken(uid){
+  var dateStr = todayString()
+  db.collection("tokens").where("uid","==",uid).where("date","==",dateStr).get()
+    .then(function(snap){
+      if(snap.empty){
+        clearAppointment()
+        return
       }
-      requestAnimationFrame(scanLoop);
-    }
+      var arr = []
+      snap.forEach(function(doc){
+        var d = doc.data()
+        d.id = doc.id
+        arr.push(d)
+      })
+      arr.sort(function(a,b){ return a.tokenNumber - b.tokenNumber })
+      var t = arr[0]
+      var maxPerDay = 60
+      db.collection("hospitals").where("hospitalId","==",t.hospitalId).get().then(function(hs){
+        if(!hs.empty) maxPerDay = hs.docs[0].data().maxPerDay || 60
+        var slotInfo = computeSlotAndWindow(t.tokenNumber, maxPerDay)
+        showAppointment(t.tokenNumber, slotInfo.window, dateStr, slotInfo.fallbackAfter)
+      })
+    })
+}
 
-    scanLoop();
+function issueTokenFor(hospitalId){
+  var user = auth.currentUser
+  if(!user) return
+  var dateStr = todayString()
+  db.collection("tokens").where("hospitalId","==",hospitalId).where("date","==",dateStr).get()
+    .then(function(snap){
+      var count = snap.size
+      db.collection("hospitals").where("hospitalId","==",hospitalId).get().then(function(hsnap){
+        var max = 60
+        if(!hsnap.empty) max = hsnap.docs[0].data().maxPerDay || 60
+        if(count >= max) return
+        var token = count + 1
+        var slotInfo = computeSlotAndWindow(token, max)
+        db.collection("tokens").add({
+          hospitalId: hospitalId,
+          uid: user.uid,
+          tokenNumber: token,
+          date: dateStr,
+          slot: slotInfo.window,
+          issuedAt: firebase.firestore.FieldValue.serverTimestamp(),
+          status: "Pending"
+        }).then(function(){
+          showAppointment(token, slotInfo.window, dateStr, slotInfo.fallbackAfter)
+        })
+      })
+    })
+}
+
+async function startScan(){
+  var video = document.getElementById("video")
+  var canvas = document.getElementById("canvas")
+  var ctx = canvas.getContext("2d")
+
+  var stream = await navigator.mediaDevices.getUserMedia({video:true})
+  video.srcObject = stream
+  await video.play()
+
+  function scanLoop(){
+    canvas.width = video.videoWidth
+    canvas.height = video.videoHeight
+    ctx.drawImage(video, 0, 0)
+    var img = ctx.getImageData(0,0,canvas.width,canvas.height)
+    var code = jsQR(img.data,img.width,img.height)
+    if(code){
+      try{
+        var data = JSON.parse(code.data)
+        if(data.hospitalId){
+          stream.getTracks().forEach(s=>s.stop())
+          issueTokenFor(data.hospitalId)
+          return
+        }
+      }catch(e){}
+    }
+    requestAnimationFrame(scanLoop)
   }
+  scanLoop()
+}
 
-  document.addEventListener("DOMContentLoaded", function(){
-    document.getElementById("signupBtn").addEventListener("click", signup);
-    document.getElementById("loginBtn").addEventListener("click", login);
-    document.getElementById("logoutBtn").addEventListener("click", logout);
-    document.getElementById("scanBtn").addEventListener("click", startScan);
-  });
+document.getElementById("signupBtn").onclick = signup
+document.getElementById("loginBtn").onclick = login
+document.getElementById("logoutBtn").onclick = logout
+document.getElementById("scanBtn").onclick = startScan
 
-  auth.onAuthStateChanged(function(user){
-    var authArea = document.getElementById("authArea");
-    var after = document.getElementById("afterLogin");
-    if(user){
-      authArea.style.display = "none";
-      after.style.display = "block";
-    }else{
-      authArea.style.display = "block";
-      after.style.display = "none";
-    }
-  });
+auth.onAuthStateChanged(function(user){
+  if(user){
+    authArea.style.display = "none"
+    afterLogin.style.display = "block"
+    fetchUserTodayToken(user.uid)
+  }else{
+    authArea.style.display = "block"
+    afterLogin.style.display = "none"
+    clearAppointment()
+  }
+})
 </script>
 
 </body>
