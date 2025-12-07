@@ -6,33 +6,31 @@
   <title>Tokens List</title>
   <link rel="stylesheet" href="./style.css">
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
+
   <style>
     body{font-family:Arial,sans-serif;padding:20px;background:#fafafa}
     .top{display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap}
     input{padding:8px;width:260px;max-width:100%}
-    button{padding:8px 12px}
+    button{padding:8px 12px;cursor:pointer}
     #list{margin-top:14px;max-width:960px}
-    .card{padding:14px;border:1px solid #e6e6e6;border-radius:8px;margin-bottom:12px;background:#fff;box-shadow:0 2px 6px rgba(0,0,0,0.03);display:flex;justify-content:space-between;align-items:center}
-    .left{line-height:1.4}
-    .title{font-size:18px;margin:0 0 6px}
+    .card{padding:14px;border:1px solid #e6e6e6;border-radius:8px;margin-bottom:12px;background:#fff;box-shadow:0 2px 6px rgba(0,0,0,0.03);display:flex;justify-content:space-between;align-items:flex-start}
+    .left{line-height:1.6;max-width:70%}
+    .tokenLine{font-size:18px;font-weight:600}
+    .tokenBig{font-size:22px;color:#1a73e8}
     .muted{color:#666;font-size:13px}
-    .actions button{margin-left:8px}
+    .actions button{margin-left:6px;margin-top:4px}
     .empty{color:#666}
-    .bigToken{font-size:28px;font-weight:700;color:#1a73e8}
   </style>
 </head>
 <body>
 
-<h2>Issued Tokens Viewer</h2>
+<h2>Issued Tokens</h2>
 
 <div class="top">
-  <input id="hospitalIdInput" placeholder="Enter Hospital ID e.g. HOSP1">
+  <input id="hospitalIdInput" placeholder="Hospital ID eg HOSP1">
   <input id="dateInput" type="date">
   <button id="loadBtn">Load Tokens</button>
-  <button id="liveBtn">Start Live</button>
-  <button id="stopLiveBtn" disabled>Stop Live</button>
 </div>
 
 <div id="list"></div>
@@ -54,111 +52,34 @@
     return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
   }
 
+  function pad(n){ return String(n).padStart(2,"0"); }
+
   function formatTime(h,m){
-    var hh = (h % 12) === 0 ? 12 : (h % 12);
-    var mm = String(m).padStart(2,"0");
     var ap = h >= 12 ? "PM" : "AM";
-    return hh + ":" + mm + " " + ap;
+    var hh = h % 12 === 0 ? 12 : h % 12;
+    return hh + ":" + pad(m) + " " + ap;
   }
 
   function computeSlotAndWindow(tokenNumber, maxPerDay){
     var perSlot = Math.max(1, Math.ceil(maxPerDay / 3));
-    var tokenIdx = tokenNumber - 1;
-    var slotIndex = Math.floor(tokenIdx / perSlot);
-    var slotStartHour = 9 + slotIndex;
-    var posInSlot = tokenIdx % perSlot;
-    var minutesPerToken = Math.floor(60 / perSlot);
-    if(minutesPerToken < 1) minutesPerToken = 1;
+    var idx = tokenNumber - 1;
+    var slotIndex = Math.floor(idx / perSlot);
+    var slotStartHour = 9 + slotIndex;  
+    var posInSlot = idx % perSlot;
+    var minutesPerToken = Math.max(1, Math.floor(60 / perSlot));
     var startMinute = posInSlot * minutesPerToken;
-    var endMinute = startMinute + minutesPerToken - 1;
-    var startTime = formatTime(slotStartHour, startMinute);
-    var endMinuteAdj = startMinute + minutesPerToken;
-    var endHour = slotStartHour + Math.floor(endMinuteAdj / 60);
-    var endMin = endMinuteAdj % 60;
-    var endTime = formatTime(endHour, endMin === 0 ? 0 : endMin);
+    var endMinuteOffset = startMinute + minutesPerToken;
+    var endHour = slotStartHour + Math.floor(endMinuteOffset / 60);
+    var endMin = endMinuteOffset % 60;
+
+    var start = formatTime(slotStartHour, startMinute);
+    var end = formatTime(endHour, endMin === 0 ? 0 : endMin);
+    var fallbackAfter = Math.max(1, Math.floor(perSlot / 2));
+
     return {
-      slotLabel: (slotStartHour) + ":00 - " + (slotStartHour+1) + ":00",
-      window: startTime + " to " + endTime,
-      fallbackAfter: Math.max(1, Math.floor(perSlot/2))
+      window: start + " to " + end,
+      fallbackAfter: fallbackAfter
     };
-  }
-
-  function renderList(docs, maxPerDay){
-    var list = document.getElementById("list");
-    list.innerHTML = "";
-    if(!docs || docs.length === 0){
-      var p = document.createElement("div");
-      p.className = "empty";
-      p.innerText = "No tokens found";
-      list.appendChild(p);
-      return;
-    }
-    docs.forEach(function(entry){
-      var card = document.createElement("div");
-      card.className = "card";
-
-      var left = document.createElement("div");
-      left.className = "left";
-
-      var title = document.createElement("div");
-      title.className = "title";
-      var tokenNum = entry.tokenNumber || 0;
-      title.innerHTML = "Token Number - <span class='bigToken'>T" + tokenNum + "</span>";
-
-      var nameLine = document.createElement("div");
-      nameLine.className = "muted";
-      nameLine.innerText = "Patient: " + (entry.name || entry.uid || "Unknown") + " | Dept: " + (entry.dept || "");
-
-      var slotInfo = computeSlotAndWindow(tokenNum, maxPerDay);
-      var visitLine = document.createElement("div");
-      visitLine.style.marginTop = "8px";
-      visitLine.innerHTML = "<strong>Visiting time:</strong> " + slotInfo.window;
-
-      var noteLine = document.createElement("div");
-      noteLine.className = "muted";
-      noteLine.style.marginTop = "6px";
-      noteLine.innerText = "If you miss this time, you will be called again after " + slotInfo.fallbackAfter + " patients.";
-
-      left.appendChild(title);
-      left.appendChild(nameLine);
-      left.appendChild(visitLine);
-      left.appendChild(noteLine);
-
-      var actions = document.createElement("div");
-      actions.className = "actions";
-
-      var statusSpan = document.createElement("div");
-      statusSpan.style.marginBottom = "8px";
-      statusSpan.innerText = entry.status ? ("Status: " + entry.status) : "Status: Pending";
-
-      var callBtn = document.createElement("button");
-      callBtn.innerText = "Call";
-      callBtn.onclick = function(){
-        db.collection("tokens").doc(entry._id).update({ status: "Called" });
-      };
-
-      var checkBtn = document.createElement("button");
-      checkBtn.innerText = "Checked In";
-      checkBtn.onclick = function(){
-        db.collection("tokens").doc(entry._id).update({ status: "Checked In" });
-      };
-
-      var delBtn = document.createElement("button");
-      delBtn.innerText = "Delete";
-      delBtn.onclick = function(){
-        if(confirm("Delete token T" + tokenNum + "?")) db.collection("tokens").doc(entry._id).delete();
-      };
-
-      actions.appendChild(statusSpan);
-      actions.appendChild(callBtn);
-      actions.appendChild(checkBtn);
-      actions.appendChild(delBtn);
-
-      card.appendChild(left);
-      card.appendChild(actions);
-
-      list.appendChild(card);
-    });
   }
 
   function sortByIssuedAt(arr){
@@ -173,86 +94,129 @@
     });
   }
 
+  function renderList(docs, maxPerDay){
+    var list = document.getElementById("list");
+    list.innerHTML = "";
+    if(!docs || docs.length === 0){
+      var p = document.createElement("div");
+      p.className = "empty";
+      p.innerText = "No tokens found";
+      list.appendChild(p);
+      return;
+    }
+
+    docs.forEach(function(entry){
+      var tokenNum = entry.tokenNumber || 0;
+      if(tokenNum <= 0) return;
+
+      var slotInfo = computeSlotAndWindow(tokenNum, maxPerDay);
+
+      var card = document.createElement("div");
+      card.className = "card";
+
+      var left = document.createElement("div");
+      left.className = "left";
+
+      var line1 = document.createElement("div");
+      line1.className = "tokenLine";
+      line1.innerHTML = "Token Number " + "<span class='tokenBig'>" + tokenNum + "</span>";
+
+      var line2 = document.createElement("div");
+      line2.className = "muted";
+      line2.innerText = "Visiting time is " + slotInfo.window;
+
+      var line3 = document.createElement("div");
+      line3.className = "muted";
+      line3.innerText = "on missing the chance at the given time you will be called again after " + slotInfo.fallbackAfter + " patients";
+
+      var line4 = document.createElement("div");
+      line4.className = "muted";
+      line4.innerText = "Date " + (entry.date || todayString());
+
+      left.appendChild(line1);
+      left.appendChild(line2);
+      left.appendChild(line3);
+      left.appendChild(line4);
+
+      var actions = document.createElement("div");
+      actions.className = "actions";
+
+      var statusSpan = document.createElement("div");
+      statusSpan.className = "muted";
+      statusSpan.innerText = "Status " + (entry.status || "Pending");
+
+      var callBtn = document.createElement("button");
+      callBtn.innerText = "Call";
+      callBtn.onclick = function(){
+        db.collection("tokens").doc(entry._id).update({ status: "Called" })
+          .catch(function(e){ alert(e.message); });
+      };
+
+      var checkBtn = document.createElement("button");
+      checkBtn.innerText = "Checked In";
+      checkBtn.onclick = function(){
+        db.collection("tokens").doc(entry._id).update({ status: "Checked In" })
+          .catch(function(e){ alert(e.message); });
+      };
+
+      var delBtn = document.createElement("button");
+      delBtn.innerText = "Delete";
+      delBtn.onclick = function(){
+        if(confirm("Delete token " + tokenNum + ""))
+          db.collection("tokens").doc(entry._id).delete().catch(function(e){ alert(e.message); });
+      };
+
+      actions.appendChild(statusSpan);
+      actions.appendChild(callBtn);
+      actions.appendChild(checkBtn);
+      actions.appendChild(delBtn);
+
+      card.appendChild(left);
+      card.appendChild(actions);
+
+      list.appendChild(card);
+    });
+  }
+
   function loadTokensOnce(hospitalId, dateStr){
     if(!hospitalId){ alert("Enter hospital ID"); return; }
     if(!dateStr) dateStr = todayString();
-    db.collection("hospitals").where("hospitalId","==",hospitalId).get().then(function(hsnap){
-      var maxPerDay = 60;
-      if(!hsnap.empty) maxPerDay = hsnap.docs[0].data().maxPerDay || 60;
-      db.collection("tokens").where("hospitalId","==",hospitalId).where("date","==",dateStr).get()
-        .then(function(snap){
-          var arr = [];
-          snap.forEach(function(doc){
-            var d = doc.data();
-            d._id = doc.id;
-            arr.push(d);
-          });
-          arr.forEach(function(d, idx){
-            if(!d.tokenNumber) d.tokenNumber = idx + 1;
-          });
-          sortByIssuedAt(arr);
-          renderList(arr, maxPerDay);
-        })
-        .catch(function(err){
-          alert("Error fetching tokens: " + err.message);
-        });
-    }).catch(function(e){ alert(e.message); });
-  }
 
-  var liveUnsub = null;
-
-  function startLiveListen(hospitalId, dateStr){
-    if(!hospitalId){ alert("Enter hospital ID"); return; }
-    if(!dateStr) dateStr = todayString();
-    stopLiveListen();
-    db.collection("hospitals").where("hospitalId","==",hospitalId).get().then(function(hsnap){
-      var maxPerDay = 60;
-      if(!hsnap.empty) maxPerDay = hsnap.docs[0].data().maxPerDay || 60;
-      var q = db.collection("tokens").where("hospitalId","==",hospitalId).where("date","==",dateStr);
-      liveUnsub = q.onSnapshot(function(snap){
-        var arr = [];
-        snap.forEach(function(doc){
-          var d = doc.data();
-          d._id = doc.id;
-          arr.push(d);
-        });
-        arr.forEach(function(d, idx){
-          if(!d.tokenNumber) d.tokenNumber = idx + 1;
-        });
-        sortByIssuedAt(arr);
-        renderList(arr, maxPerDay);
-      }, function(err){
-        alert("Error listening tokens: " + err.message);
+    db.collection("hospitals").where("hospitalId","==",hospitalId).get()
+      .then(function(hsnap){
+        var maxPerDay = 60;
+        if(!hsnap.empty){
+          var hdata = hsnap.docs[0].data();
+          if(hdata.maxPerDay) maxPerDay = hdata.maxPerDay;
+        }
+        return db.collection("tokens")
+          .where("hospitalId","==",hospitalId)
+          .where("date","==",dateStr)
+          .get()
+          .then(function(snap){
+            var arr = [];
+            snap.forEach(function(doc){
+              var d = doc.data();
+              d._id = doc.id;
+              arr.push(d);
+            });
+            sortByIssuedAt(arr);
+            renderList(arr, maxPerDay);
+          });
+      })
+      .catch(function(err){
+        alert("Error " + err.message);
       });
-      document.getElementById("liveBtn").disabled = true;
-      document.getElementById("stopLiveBtn").disabled = false;
-    }).catch(function(e){ alert(e.message); });
   }
-
-  function stopLiveListen(){
-    if(liveUnsub){ liveUnsub(); liveUnsub = null; }
-    document.getElementById("liveBtn").disabled = false;
-    document.getElementById("stopLiveBtn").disabled = true;
-  }
-
-  document.getElementById("loadBtn").addEventListener("click", function(){
-    var hid = document.getElementById("hospitalIdInput").value.trim();
-    var dateVal = document.getElementById("dateInput").value;
-    loadTokensOnce(hid, dateVal);
-  });
-
-  document.getElementById("liveBtn").addEventListener("click", function(){
-    var hid = document.getElementById("hospitalIdInput").value.trim();
-    var dateVal = document.getElementById("dateInput").value;
-    startLiveListen(hid, dateVal);
-  });
-
-  document.getElementById("stopLiveBtn").addEventListener("click", function(){
-    stopLiveListen();
-  });
 
   document.addEventListener("DOMContentLoaded", function(){
     document.getElementById("dateInput").value = todayString();
+
+    document.getElementById("loadBtn").addEventListener("click", function(){
+      var hid = document.getElementById("hospitalIdInput").value.trim();
+      var d = document.getElementById("dateInput").value;
+      loadTokensOnce(hid, d);
+    });
   });
 </script>
 
